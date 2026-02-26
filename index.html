@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Drativasta">
+<meta name="theme-color" content="#4A7C2F">
+<meta name="description" content="AI-powered farming intelligence: weather, soil & plant health">
+<title>Drativasta</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+
+<!-- Inline PWA manifest via JS -->
+<script>
+(function(){
+  const manifest = {
+    name: "Drativasta — Smart Farming",
+    short_name: "Drativasta",
+    description: "AI-powered farming intelligence",
+    start_url: "/",
+    display: "standalone",
+    background_color: "#0F1A0A",
+    theme_color: "#4A7C2F",
+    orientation: "portrait-primary",
+    icons: [
+      { src: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='40' fill='%234A7C2F'/><text y='140' x='96' text-anchor='middle' font-size='120'>🌿</text></svg>", sizes: "192x192", type: "image/svg+xml", purpose: "any maskable" }
+    ]
+  };
+  const blob = new Blob([JSON.stringify(manifest)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('link');
+  link.rel = 'manifest'; link.href = url;
+  document.head.appendChild(link);
+})();
+</script>
+
+<!-- Inline Service Worker via JS -->
+<script>
+if ('serviceWorker' in navigator) {
+  const swCode = `
+    const CACHE = 'drativasta-v2';
+    self.addEventListener('install', e => {
+      e.waitUntil(caches.open(CACHE).then(c => c.addAll(['/'])));
+      self.skipWaiting();
+    });
+    self.addEventListener('activate', e => {
+      e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))));
+      self.clients.claim();
+    });
+    self.addEventListener('fetch', e => {
+      if (e.request.url.includes('anthropic') || e.request.url.includes('fonts')) return;
+      e.respondWith(
+        fetch(e.request).then(r => {
+          const c = r.clone();
+          caches.open(CACHE).then(cache => cache.put(e.request, c));
+          return r;
+        }).catch(() => caches.match(e.request).then(r => r || caches.match('/')))
+      );
+    });
+  `;
+  const blob = new Blob([swCode], {type:'application/javascript'});
+  navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(()=>{});
+}
+</script>
+
+<style>
+:root {
+  --earth:#2D4A1E; --moss:#4A7C2F; --sage:#8FB573; --leaf:#6aad4a;
+  --wheat:#D4A843; --cream:#F5EED8; --soil:#6B4226; --dark:#0F1A0A;
+  --dark2:#141f0d; --card:rgba(245,238,216,.055); --border:rgba(143,181,115,.18);
+  --safe-top:env(safe-area-inset-top,0px); --safe-bot:env(safe-area-inset-bottom,0px);
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;font-family:'Syne',sans-serif;background:var(--dark);color:var(--cream);overscroll-behavior:none}
+body{display:flex;flex-direction:column;overflow:hidden}
+
+#bg{position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:radial-gradient(ellipse at 15% 40%,rgba(45,74,30,.5) 0%,transparent 55%),
+             radial-gradient(ellipse at 85% 15%,rgba(107,66,38,.35) 0%,transparent 50%),
+             radial-gradient(ellipse at 55% 85%,rgba(74,124,47,.25) 0%,transparent 50%)}
+
+/* TOP BAR */
+.top-bar{position:fixed;top:0;left:0;right:0;z-index:100;
+  padding:calc(var(--safe-top) + 14px) 20px 14px;
+  background:rgba(15,26,10,.85);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.brand{display:flex;align-items:center;gap:10px}
+.brand-icon{width:38px;height:38px;background:linear-gradient(135deg,var(--moss),var(--leaf));
+  border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;
+  box-shadow:0 4px 16px rgba(74,124,47,.4)}
+.brand-name{font-size:22px;font-weight:800;letter-spacing:-.5px;
+  background:linear-gradient(120deg,var(--sage),var(--wheat));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.brand-sub{font-family:'Space Mono',monospace;font-size:9px;color:rgba(143,181,115,.5);
+  letter-spacing:2px;text-transform:uppercase;margin-top:1px}
+.install-btn-top{background:rgba(143,181,115,.15);border:1px solid var(--border);border-radius:8px;
+  color:var(--sage);font-family:'Syne',sans-serif;font-size:12px;font-weight:700;
+  padding:7px 12px;cursor:pointer;transition:all .2s;display:none}
+.install-btn-top.show{display:block}
+
+/* SCROLL */
+.scroll-area{flex:1;overflow-y:auto;overflow-x:hidden;position:relative;z-index:1;
+  padding-top:calc(var(--safe-top) + 70px);padding-bottom:calc(var(--safe-bot) + 72px);
+  -webkit-overflow-scrolling:touch;scroll-behavior:smooth}
+
+/* PANELS */
+.panel{display:none;padding:16px 16px 8px;animation:fadeUp .35s ease}
+.panel.active{display:block}
+@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+
+/* CARDS */
+.card{background:var(--card);border:1px solid var(--border);border-radius:20px;padding:20px;
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);margin-bottom:14px}
+.card-label{font-family:'Space Mono',monospace;font-size:10px;color:var(--sage);
+  letter-spacing:2.5px;text-transform:uppercase;margin-bottom:16px}
+
+/* INPUTS */
+input[type=text],input[type=number],select,textarea{width:100%;background:rgba(0,0,0,.3);
+  border:1px solid var(--border);border-radius:12px;color:var(--cream);
+  font-family:'Syne',sans-serif;font-size:16px;padding:13px 15px;outline:none;
+  transition:border-color .2s,box-shadow .2s}
+input::placeholder,textarea::placeholder{color:rgba(245,238,216,.28)}
+input:focus,select:focus,textarea:focus{border-color:var(--sage);box-shadow:0 0 0 3px rgba(143,181,115,.15)}
+select option{background:var(--dark2)}
+.input-row{display:flex;gap:10px;margin-bottom:16px}
+
+/* BUTTONS */
+.btn{border:none;border-radius:14px;font-family:'Syne',sans-serif;font-size:15px;font-weight:700;
+  cursor:pointer;transition:all .2s;white-space:nowrap;letter-spacing:.3px;padding:14px 22px;
+  display:flex;align-items:center;justify-content:center;gap:7px}
+.btn-primary{background:linear-gradient(135deg,var(--moss),#366222);color:var(--cream);
+  box-shadow:0 4px 18px rgba(74,124,47,.38);width:100%}
+.btn-primary:active{transform:scale(.97)}
+.btn-primary:disabled{opacity:.45;cursor:not-allowed;transform:none}
+.btn-ghost{background:rgba(143,181,115,.1);border:1px solid var(--border);color:var(--sage);flex:1}
+.btn-ghost:active{background:rgba(143,181,115,.2)}
+
+/* BADGE */
+.badge{display:inline-flex;align-items:center;gap:5px;background:rgba(143,181,115,.1);
+  border:1px solid rgba(143,181,115,.2);border-radius:30px;padding:4px 11px;
+  font-size:11px;color:var(--sage);font-family:'Space Mono',monospace;margin-bottom:14px;letter-spacing:.5px}
+
+/* WEATHER */
+.weather-hero{text-align:center;padding:16px 0 8px}
+.w-emoji{font-size:72px;line-height:1;margin-bottom:8px}
+.w-temp{font-size:64px;font-weight:800;line-height:1;
+  background:linear-gradient(135deg,var(--cream),var(--wheat));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.w-cond{font-size:17px;color:var(--sage);margin-top:6px;font-weight:600}
+.w-loc{font-family:'Space Mono',monospace;font-size:11px;color:rgba(245,238,216,.4);margin-top:5px;letter-spacing:.5px}
+.stats-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:18px}
+.stat-box{background:rgba(0,0,0,.22);border:1px solid var(--border);border-radius:14px;padding:12px 8px;text-align:center}
+.stat-lbl{font-family:'Space Mono',monospace;font-size:9px;color:rgba(245,238,216,.38);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:4px}
+.stat-val{font-size:18px;font-weight:800;color:var(--wheat)}
+.forecast-scroll{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin-top:4px;scrollbar-width:none}
+.forecast-scroll::-webkit-scrollbar{display:none}
+.fc-day{flex-shrink:0;background:rgba(0,0,0,.22);border:1px solid var(--border);border-radius:14px;
+  padding:12px 14px;text-align:center;min-width:72px}
+.fc-day .fc-d{font-family:'Space Mono',monospace;font-size:9px;color:rgba(245,238,216,.45);letter-spacing:1px}
+.fc-day .fc-i{font-size:22px;margin:6px 0}
+.fc-day .fc-h{font-size:14px;font-weight:800;color:var(--wheat)}
+.fc-day .fc-l{font-size:11px;color:rgba(245,238,216,.38);margin-top:2px}
+.agri-tip{background:linear-gradient(135deg,rgba(45,74,30,.4),rgba(74,124,47,.15));
+  border:1px solid rgba(143,181,115,.25);border-radius:14px;padding:14px 16px;
+  margin-top:14px;font-size:13px;line-height:1.65;color:var(--sage)}
+.agri-tip strong{color:var(--cream)}
+
+/* SOIL */
+.soil-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+.fg label{display:block;font-family:'Space Mono',monospace;font-size:10px;color:var(--sage);
+  letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px}
+
+/* PLANT */
+.capture-row{display:flex;gap:10px;margin-bottom:14px}
+.preview-img{width:100%;border-radius:14px;display:none;margin-bottom:10px;max-height:280px;object-fit:cover}
+.cap-source{font-family:'Space Mono',monospace;font-size:10px;color:var(--sage);
+  letter-spacing:1.5px;margin-bottom:12px;display:none}
+
+/* CAMERA */
+.cam-modal{display:none;position:fixed;inset:0;z-index:500;background:#000;
+  flex-direction:column;align-items:center;justify-content:space-between;
+  padding:calc(var(--safe-top) + 12px) 16px calc(var(--safe-bot) + 24px)}
+.cam-modal.open{display:flex}
+.cam-modal video{width:100%;flex:1;object-fit:cover;border-radius:20px;background:#111;max-height:70vh}
+.cam-hint{font-family:'Space Mono',monospace;font-size:10px;color:rgba(255,255,255,.4);
+  letter-spacing:2px;text-align:center;margin:10px 0 6px}
+.cam-controls{display:flex;align-items:center;justify-content:center;gap:24px;padding-top:14px;width:100%}
+.shutter{width:72px;height:72px;border-radius:50%;background:var(--cream);border:5px solid var(--sage);
+  cursor:pointer;transition:transform .12s;box-shadow:0 0 0 8px rgba(143,181,115,.15);flex-shrink:0}
+.shutter:active{transform:scale(.9)}
+.cam-btn{width:48px;height:48px;border-radius:50%;border:1px solid rgba(255,255,255,.2);
+  background:rgba(255,255,255,.1);color:#fff;font-size:18px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;transition:background .15s;flex-shrink:0}
+.cam-btn:active{background:rgba(255,255,255,.22)}
+canvas#snapshot{display:none}
+
+/* LOADER */
+.loader{display:none;text-align:center;padding:28px;color:var(--sage)}
+.loader.on{display:block}
+.spinner{width:38px;height:38px;border:3px solid var(--border);border-top-color:var(--sage);
+  border-radius:50%;animation:spin .75s linear infinite;margin:0 auto 12px}
+.loader-txt{font-family:'Space Mono',monospace;font-size:11px;letter-spacing:2px;
+  color:rgba(143,181,115,.7);animation:pulse 1.5s ease-in-out infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{0%,100%{opacity:.5}50%{opacity:1}}
+
+/* RESULT */
+.result-box{background:rgba(0,0,0,.22);border:1px solid rgba(143,181,115,.2);border-radius:16px;
+  padding:18px;margin-top:12px;font-size:14px;line-height:1.8;white-space:pre-wrap;display:none}
+.result-box.on{display:block;animation:fadeUp .35s ease}
+
+/* SECTION HDR */
+.section-hdr{font-family:'Space Mono',monospace;font-size:10px;color:var(--sage);
+  letter-spacing:2px;text-transform:uppercase;margin:18px 0 10px;
+  display:flex;align-items:center;gap:8px}
+.section-hdr::after{content:'';flex:1;height:1px;background:var(--border)}
+
+/* BOTTOM NAV */
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;z-index:100;
+  background:rgba(15,26,10,.9);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  border-top:1px solid var(--border);display:flex;
+  padding:8px 8px calc(var(--safe-bot) + 8px)}
+.nav-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 4px;
+  cursor:pointer;border:none;background:transparent;border-radius:14px;transition:all .2s}
+.nav-btn .nav-icon{font-size:22px;transition:transform .2s}
+.nav-btn .nav-lbl{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;
+  color:rgba(245,238,216,.4);text-transform:uppercase;transition:color .2s}
+.nav-btn.active .nav-lbl{color:var(--sage)}
+.nav-btn.active .nav-icon{transform:scale(1.15);filter:drop-shadow(0 0 8px rgba(143,181,115,.6))}
+.nav-btn.active{background:rgba(143,181,115,.08)}
+
+/* SETUP SCREEN */
+.setup-screen{display:none;position:fixed;inset:0;z-index:200;
+  background:rgba(15,26,10,.97);backdrop-filter:blur(20px);
+  flex-direction:column;align-items:center;justify-content:center;padding:32px 24px;text-align:center}
+.setup-screen.show{display:flex}
+.setup-icon{font-size:64px;margin-bottom:20px}
+.setup-title{font-size:26px;font-weight:800;margin-bottom:8px;
+  background:linear-gradient(120deg,var(--sage),var(--wheat));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.setup-sub{font-family:'Space Mono',monospace;font-size:11px;color:rgba(245,238,216,.5);
+  letter-spacing:1.5px;margin-bottom:28px;line-height:1.8}
+.setup-input-wrap{width:100%;max-width:380px;margin-bottom:12px}
+.setup-input-wrap input{font-size:16px;padding:15px 18px;border-radius:16px}
+.setup-hint{font-size:12px;color:rgba(245,238,216,.35);font-family:'Space Mono',monospace;
+  margin-bottom:24px;line-height:1.7;max-width:340px}
+.setup-hint a{color:var(--sage)}
+.setup-btn{background:linear-gradient(135deg,var(--moss),#366222);color:var(--cream);
+  border:none;border-radius:16px;padding:16px 40px;font-family:'Syne',sans-serif;
+  font-size:16px;font-weight:800;cursor:pointer;box-shadow:0 4px 20px rgba(74,124,47,.4);
+  transition:all .2s;width:100%;max-width:380px}
+.setup-btn:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(74,124,47,.5)}
+.setup-error{color:#e07070;font-family:'Space Mono',monospace;font-size:12px;
+  margin-top:10px;display:none}
+.setup-error.show{display:block}
+
+/* INSTALL BANNER */
+.install-banner{display:none;position:fixed;bottom:calc(var(--safe-bot) + 76px);
+  left:16px;right:16px;z-index:200;background:linear-gradient(135deg,var(--earth),var(--dark2));
+  border:1px solid var(--border);border-radius:18px;padding:16px 18px;gap:14px;
+  align-items:center;box-shadow:0 8px 32px rgba(0,0,0,.5);animation:slideUp .4s ease}
+.install-banner.show{display:flex}
+@keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+.ib-text{flex:1}
+.ib-text strong{font-size:14px;display:block;margin-bottom:2px}
+.ib-text span{font-size:11px;color:rgba(245,238,216,.5);font-family:'Space Mono',monospace}
+.ib-btns{display:flex;flex-direction:column;gap:6px}
+.ib-install{background:linear-gradient(135deg,var(--moss),var(--earth));color:var(--cream);
+  border:none;border-radius:10px;padding:8px 16px;font-family:'Syne',sans-serif;
+  font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap}
+.ib-dismiss{background:transparent;color:rgba(245,238,216,.4);border:none;
+  font-size:11px;cursor:pointer;text-align:center;font-family:'Space Mono',monospace}
+
+/* TOAST */
+.toast{position:fixed;top:calc(var(--safe-top) + 80px);left:50%;transform:translateX(-50%);
+  z-index:400;background:rgba(45,74,30,.95);border:1px solid var(--border);
+  border-radius:30px;padding:10px 20px;font-family:'Space Mono',monospace;font-size:12px;
+  color:var(--sage);letter-spacing:1px;pointer-events:none;opacity:0;transition:opacity .3s;white-space:nowrap}
+.toast.show{opacity:1}
+
+@media(min-width:480px){.card{padding:24px}.w-temp{font-size:76px}}
+@media(min-width:768px){.scroll-area,.setup-screen{max-width:480px;margin:0 auto;left:50%;transform:translateX(-50%)}}
+</style>
+</head>
+<body>
+<div id="bg"></div>
+
+<!-- ── API KEY SETUP SCREEN ───────────────────── -->
+<div class="setup-screen" id="setup-screen">
+  <div class="setup-icon">🌿</div>
+  <div class="setup-title">Welcome to Drativasta</div>
+  <div class="setup-sub">SMART FARMING INTELLIGENCE<br>Enter your Anthropic API key to get started</div>
+  <div class="setup-input-wrap">
+    <input type="password" id="api-key-input" placeholder="sk-ant-api03-..." autocomplete="off" spellcheck="false">
+  </div>
+  <div class="setup-hint">
+    Get a free API key at <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a><br>
+    Your key is stored only on this device and never shared.
+  </div>
+  <button class="setup-btn" onclick="saveApiKey()">🚀 Start Drativasta</button>
+  <div class="setup-error" id="setup-error">Invalid key format. Should start with sk-ant-</div>
+</div>
+
+<!-- ── TOP BAR ───────────────────────────────── -->
+<div class="top-bar">
+  <div class="brand">
+    <div class="brand-icon">🌿</div>
+    <div>
+      <div class="brand-name">Drativasta</div>
+      <div class="brand-sub">Smart Farming AI</div>
+    </div>
+  </div>
+  <button class="install-btn-top" id="install-btn-top" onclick="triggerInstall()">⬇ Install</button>
+</div>
+
+<!-- ── SCROLL CONTENT ─────────────────────────── -->
+<div class="scroll-area" id="scroll-area">
+
+  <!-- WEATHER -->
+  <div class="panel active" id="panel-weather">
+    <div class="card">
+      <div class="card-label">📍 Location</div>
+      <div class="input-row">
+        <input type="text" id="w-loc" placeholder="City or region..." value="Chennai, Tamil Nadu" autocomplete="off" spellcheck="false">
+        <button class="btn btn-ghost" style="flex:0 0 auto;padding:13px 16px;" onclick="fetchWeather()">Go</button>
+      </div>
+      <button class="btn btn-ghost" style="width:100%;margin-bottom:4px;font-size:13px;" onclick="useGPS()">📡 Use My GPS Location</button>
+      <div class="loader" id="w-loader"><div class="spinner"></div><div class="loader-txt">FETCHING WEATHER DATA...</div></div>
+      <div id="w-result"></div>
+    </div>
+  </div>
+
+  <!-- SOIL -->
+  <div class="panel" id="panel-soil">
+    <div class="card">
+      <div class="card-label">🪨 Soil Analysis</div>
+      <div class="badge">✦ Enter sensor or lab readings</div>
+      <div class="soil-grid">
+        <div class="fg"><label>pH Level</label><input type="number" id="s-ph" placeholder="e.g. 6.5" min="0" max="14" step="0.1"></div>
+        <div class="fg"><label>Moisture %</label><input type="number" id="s-moist" placeholder="e.g. 45"></div>
+        <div class="fg"><label>Nitrogen N</label><input type="number" id="s-n" placeholder="mg/kg"></div>
+        <div class="fg"><label>Phosphorus P</label><input type="number" id="s-p" placeholder="mg/kg"></div>
+        <div class="fg"><label>Potassium K</label><input type="number" id="s-k" placeholder="mg/kg"></div>
+        <div class="fg">
+          <label>Soil Type</label>
+          <select id="s-type">
+            <option value="">— Select —</option>
+            <option>Clay</option><option>Sandy</option><option>Loam</option>
+            <option>Silt</option><option>Peat</option><option>Chalky</option>
+          </select>
+        </div>
+      </div>
+      <div class="fg" style="margin-bottom:16px"><label>Intended Crop (optional)</label>
+        <input type="text" id="s-crop" placeholder="e.g. Rice, Wheat, Tomatoes..."></div>
+      <button class="btn btn-primary" onclick="analyzeSoil()">🔬 Analyze Soil</button>
+      <div class="loader" id="s-loader"><div class="spinner"></div><div class="loader-txt">PROCESSING SOIL DATA...</div></div>
+      <div class="result-box" id="s-result"></div>
+    </div>
+  </div>
+
+  <!-- PLANT -->
+  <div class="panel" id="panel-plant">
+    <div class="card">
+      <div class="card-label">🌱 Plant Health</div>
+      <div class="badge">✦ Capture or upload a plant photo</div>
+      <div class="capture-row">
+        <button class="btn btn-primary" style="flex:1" onclick="openCam()">📷 Camera</button>
+        <button class="btn btn-ghost" onclick="document.getElementById('file-in').click()">📁 Upload</button>
+      </div>
+      <input type="file" id="file-in" accept="image/*" style="display:none" onchange="onFileUpload(event)">
+      <img id="plant-preview" class="preview-img" src="" alt="Plant preview">
+      <div class="cap-source" id="cap-src"></div>
+      <div class="fg" style="margin-bottom:14px">
+        <label>Extra context (optional)</label>
+        <textarea id="p-ctx" rows="2" placeholder="e.g. Outdoor tomato, yellowing started 3 days ago..."></textarea>
+      </div>
+      <button class="btn btn-primary" id="p-btn" onclick="analyzePlant()" disabled>🔬 Detect Issues</button>
+      <div class="loader" id="p-loader"><div class="spinner"></div><div class="loader-txt">SCANNING PLANT IMAGERY...</div></div>
+      <div class="result-box" id="p-result"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── CAMERA MODAL ───────────────────────────── -->
+<div class="cam-modal" id="cam-modal">
+  <div class="cam-hint">POINT AT PLANT · TAP CIRCLE TO CAPTURE</div>
+  <video id="cam-feed" autoplay playsinline muted></video>
+  <div class="cam-controls">
+    <button class="cam-btn" onclick="closeCam()">✕</button>
+    <button class="shutter" onclick="capturePhoto()"></button>
+    <button class="cam-btn" onclick="flipCam()">↩</button>
+  </div>
+  <canvas id="snapshot"></canvas>
+</div>
+
+<!-- ── BOTTOM NAV ─────────────────────────────── -->
+<nav class="bottom-nav">
+  <button class="nav-btn active" id="nav-weather" onclick="switchTab('weather')">
+    <span class="nav-icon">🌤</span><span class="nav-lbl">Weather</span>
+  </button>
+  <button class="nav-btn" id="nav-soil" onclick="switchTab('soil')">
+    <span class="nav-icon">🪨</span><span class="nav-lbl">Soil</span>
+  </button>
+  <button class="nav-btn" id="nav-plant" onclick="switchTab('plant')">
+    <span class="nav-icon">🌱</span><span class="nav-lbl">Plant</span>
+  </button>
+</nav>
+
+<!-- ── INSTALL BANNER ─────────────────────────── -->
+<div class="install-banner" id="install-banner">
+  <div class="ib-text">
+    <strong>Install Drativasta</strong>
+    <span>Add to home screen · works offline</span>
+  </div>
+  <div class="ib-btns">
+    <button class="ib-install" onclick="triggerInstall()">Install</button>
+    <button class="ib-dismiss" onclick="dismissBanner()">Not now</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+
+// ─── API KEY MANAGEMENT ───────────────────────
+const KEY_STORE = 'drativasta_api_key';
+
+function getApiKey() { return localStorage.getItem(KEY_STORE) || ''; }
+
+function saveApiKey() {
+  const key = document.getElementById('api-key-input').value.trim();
+  const err = document.getElementById('setup-error');
+  if (!key.startsWith('sk-ant-') && !key.startsWith('sk-')) {
+    err.classList.add('show'); return;
+  }
+  err.classList.remove('show');
+  localStorage.setItem(KEY_STORE, key);
+  document.getElementById('setup-screen').classList.remove('show');
+  fetchWeather();
+}
+
+function checkApiKey() {
+  if (!getApiKey()) document.getElementById('setup-screen').classList.add('show');
+}
+
+// Allow Enter key on setup
+document.getElementById('api-key-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') saveApiKey();
+});
+
+// ─── TOAST ────────────────────────────────────
+function showToast(msg, ms=2400) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), ms);
+}
+
+// ─── PWA INSTALL ──────────────────────────────
+let deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault(); deferredPrompt = e;
+  document.getElementById('install-banner').classList.add('show');
+  document.getElementById('install-btn-top').classList.add('show');
+});
+window.addEventListener('appinstalled', () => {
+  dismissBanner(); showToast('✅ Drativasta installed!'); deferredPrompt = null;
+});
+async function triggerInstall() {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt(); await deferredPrompt.userChoice;
+  deferredPrompt = null; dismissBanner();
+}
+function dismissBanner() {
+  document.getElementById('install-banner').classList.remove('show');
+  document.getElementById('install-btn-top').classList.remove('show');
+}
+window.addEventListener('offline', () => showToast('📵 Offline mode', 3500));
+window.addEventListener('online',  () => showToast('✅ Back online', 2000));
+
+// ─── TAB NAV ──────────────────────────────────
+function switchTab(tab) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('panel-'+tab).classList.add('active');
+  document.getElementById('nav-'+tab).classList.add('active');
+  document.getElementById('scroll-area').scrollTo({top:0,behavior:'smooth'});
+}
+
+// ─── API CALL ─────────────────────────────────
+async function callClaude(messages, system) {
+  const apiKey = getApiKey();
+  if (!apiKey) { document.getElementById('setup-screen').classList.add('show'); throw new Error('No API key'); }
+
+  // Try direct API call (works if CORS allows, or via proxy)
+  const payload = { model:'claude-sonnet-4-20250514', max_tokens:1000, system, messages };
+
+  // Use Netlify proxy function
+  let endpoint = '/.netlify/functions/claude';
+
+  // Fallback: try direct if not on netlify
+  if (!window.location.hostname.includes('netlify') && !window.location.hostname.includes('localhost')) {
+    endpoint = 'https://api.anthropic.com/v1/messages';
+  }
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (endpoint.includes('anthropic.com')) {
+    headers['x-api-key'] = apiKey;
+    headers['anthropic-version'] = '2023-06-01';
+    headers['anthropic-dangerous-direct-browser-access'] = 'true';
+  }
+
+  const res = await fetch(endpoint, { method:'POST', headers, body:JSON.stringify(payload) });
+  const d = await res.json();
+  if (d.error) throw new Error(d.error.message);
+  return d.content.map(b => b.text||'').join('');
+}
+
+// ─── WEATHER ──────────────────────────────────
+async function fetchWeather(locOverride) {
+  if (!getApiKey()) { checkApiKey(); return; }
+  const loc = locOverride || document.getElementById('w-loc').value.trim();
+  if (!loc) { showToast('Enter a location first'); return; }
+  const loader = document.getElementById('w-loader');
+  const result = document.getElementById('w-result');
+  loader.classList.add('on'); result.innerHTML='';
+  try {
+    const text = await callClaude(
+      [{role:'user',content:`Weather report for: ${loc}. Today: ${new Date().toLocaleDateString('en-IN',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}`}],
+      `You are a meteorological AI. Return ONLY valid JSON (no markdown) for the location:
+{"location":"City, Country","current":{"temp_c":28,"feels_like":31,"condition":"Partly Cloudy","emoji":"⛅","humidity":72,"wind_kmh":14,"uv_index":7,"visibility_km":10,"pressure_hpa":1013},"forecast":[{"day":"MON","emoji":"☀️","high":31,"low":24},{"day":"TUE","emoji":"🌧","high":27,"low":22},{"day":"WED","emoji":"⛅","high":29,"low":23},{"day":"THU","emoji":"🌤","high":30,"low":24},{"day":"FRI","emoji":"☀️","high":33,"low":25}],"agri_tip":"A practical 2-sentence farming tip for this weather."}`
+    );
+    renderWeather(JSON.parse(text.replace(/```json|```/g,'').trim()));
+  } catch(e) {
+    if (e.message !== 'No API key')
+      result.innerHTML=`<div class="agri-tip" style="color:#e07070">⚠️ ${e.message}</div>`;
+  } finally { loader.classList.remove('on'); }
+}
+
+function renderWeather(d) {
+  const c = d.current;
+  const fcHTML = d.forecast.map(f=>`
+    <div class="fc-day"><div class="fc-d">${f.day}</div><div class="fc-i">${f.emoji}</div>
+    <div class="fc-h">${f.high}°</div><div class="fc-l">${f.low}°</div></div>`).join('');
+  document.getElementById('w-result').innerHTML=`
+    <div class="weather-hero">
+      <div class="w-emoji">${c.emoji}</div>
+      <div class="w-temp">${c.temp_c}°C</div>
+      <div class="w-cond">${c.condition}</div>
+      <div class="w-loc">📍 ${d.location} · Feels ${c.feels_like}°C</div>
+    </div>
+    <div class="stats-grid">
+      <div class="stat-box"><div class="stat-lbl">Humidity</div><div class="stat-val">${c.humidity}%</div></div>
+      <div class="stat-box"><div class="stat-lbl">Wind</div><div class="stat-val">${c.wind_kmh}</div></div>
+      <div class="stat-box"><div class="stat-lbl">UV</div><div class="stat-val">${c.uv_index}</div></div>
+      <div class="stat-box"><div class="stat-lbl">Visibility</div><div class="stat-val">${c.visibility_km}</div></div>
+      <div class="stat-box"><div class="stat-lbl">Pressure</div><div class="stat-val">${c.pressure_hpa}</div></div>
+      <div class="stat-box"><div class="stat-lbl">Today</div><div class="stat-val" style="font-size:20px">${c.emoji}</div></div>
+    </div>
+    <div class="section-hdr">5-Day Forecast</div>
+    <div class="forecast-scroll">${fcHTML}</div>
+    <div class="agri-tip"><strong>🌾 Farming Tip:</strong> ${d.agri_tip}</div>`;
+}
+
+async function useGPS() {
+  if (!navigator.geolocation) { showToast('GPS not supported'); return; }
+  showToast('📡 Getting location...');
+  navigator.geolocation.getCurrentPosition(
+    pos => { const l=`${pos.coords.latitude.toFixed(4)},${pos.coords.longitude.toFixed(4)}`; document.getElementById('w-loc').value=l; fetchWeather(l); },
+    () => showToast('⚠️ Location access denied')
+  );
+}
+
+// ─── SOIL ─────────────────────────────────────
+async function analyzeSoil() {
+  const ph=document.getElementById('s-ph').value, m=document.getElementById('s-moist').value,
+        n=document.getElementById('s-n').value, p=document.getElementById('s-p').value,
+        k=document.getElementById('s-k').value, ty=document.getElementById('s-type').value,
+        cr=document.getElementById('s-crop').value;
+  if ([ph,m,n,p,k].filter(Boolean).length < 2) { showToast('Enter at least 2 readings'); return; }
+  const loader=document.getElementById('s-loader'), result=document.getElementById('s-result');
+  loader.classList.add('on'); result.classList.remove('on');
+  try {
+    const text = await callClaude(
+      [{role:'user',content:`Analyze soil:\npH:${ph||'—'}\nMoisture:${m||'—'}%\nN:${n||'—'} mg/kg\nP:${p||'—'} mg/kg\nK:${k||'—'} mg/kg\nType:${ty||'—'}\nCrop:${cr||'—'}`}],
+      `You are an expert agronomist. Give a comprehensive soil report with sections:
+🔬 SOIL HEALTH OVERVIEW
+📊 PARAMETER ANALYSIS
+⚠️ KEY ISSUES IDENTIFIED
+✅ RECOMMENDATIONS
+🌾 CROP SUITABILITY
+Be practical, plain text only.`
+    );
+    result.textContent=text; result.classList.add('on');
+  } catch(e) { if(e.message!=='No API key'){result.textContent='Error: '+e.message;result.classList.add('on');} }
+  finally { loader.classList.remove('on'); }
+}
+
+// ─── PLANT + CAMERA ───────────────────────────
+let plantB64=null, plantMime='image/jpeg', stream=null, facingMode='environment';
+
+function onFileUpload(e) {
+  const f=e.target.files[0]; if(!f) return;
+  plantMime=f.type||'image/jpeg';
+  const r=new FileReader();
+  r.onload=ev=>{plantB64=ev.target.result.split(',')[1]; setPreview(ev.target.result,'📁 Photo uploaded');};
+  r.readAsDataURL(f);
+}
+
+function setPreview(src,lbl) {
+  const img=document.getElementById('plant-preview'), s=document.getElementById('cap-src');
+  img.src=src; img.style.display='block';
+  s.textContent=lbl; s.style.display='block';
+  document.getElementById('p-btn').disabled=false;
+  document.getElementById('p-result').classList.remove('on');
+}
+
+async function openCam() {
+  try {
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode,width:{ideal:1280},height:{ideal:960}},audio:false});
+    document.getElementById('cam-feed').srcObject=stream;
+    document.getElementById('cam-modal').classList.add('open');
+    document.body.style.overflow='hidden';
+  } catch(err) { showToast('⚠️ Camera unavailable — try Upload instead'); }
+}
+
+function closeCam() {
+  if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
+  document.getElementById('cam-modal').classList.remove('open');
+  document.body.style.overflow='';
+}
+
+async function flipCam() {
+  facingMode=facingMode==='environment'?'user':'environment';
+  if(stream) stream.getTracks().forEach(t=>t.stop());
+  try {
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode,width:{ideal:1280},height:{ideal:960}},audio:false});
+    document.getElementById('cam-feed').srcObject=stream;
+  } catch { facingMode=facingMode==='environment'?'user':'environment'; }
+}
+
+function capturePhoto() {
+  const vid=document.getElementById('cam-feed'), cnv=document.getElementById('snapshot');
+  cnv.width=vid.videoWidth; cnv.height=vid.videoHeight;
+  cnv.getContext('2d').drawImage(vid,0,0);
+  const modal=document.getElementById('cam-modal');
+  modal.style.background='#fff'; setTimeout(()=>modal.style.background='#000',100);
+  const url=cnv.toDataURL('image/jpeg',.92);
+  plantB64=url.split(',')[1]; plantMime='image/jpeg';
+  closeCam(); setPreview(url,'📷 Captured from camera');
+}
+
+async function analyzePlant() {
+  if(!plantB64) return;
+  const ctx=document.getElementById('p-ctx').value;
+  const loader=document.getElementById('p-loader'), result=document.getElementById('p-result');
+  loader.classList.add('on'); result.classList.remove('on');
+  const apiKey = getApiKey();
+  if (!apiKey) { checkApiKey(); loader.classList.remove('on'); return; }
+  try {
+    let endpoint = '/.netlify/functions/claude';
+    if (!window.location.hostname.includes('netlify') && !window.location.hostname.includes('localhost')) {
+      endpoint = 'https://api.anthropic.com/v1/messages';
+    }
+    const headers = {'Content-Type':'application/json'};
+    if (endpoint.includes('anthropic.com')) {
+      headers['x-api-key']=apiKey;
+      headers['anthropic-version']='2023-06-01';
+      headers['anthropic-dangerous-direct-browser-access']='true';
+    }
+    const res=await fetch(endpoint,{method:'POST',headers,body:JSON.stringify({
+      model:'claude-sonnet-4-20250514',max_tokens:1000,
+      system:`You are an expert plant pathologist. Analyze plant images with sections:
+🌿 PLANT IDENTIFICATION
+🔍 VISUAL OBSERVATIONS
+🩺 DIAGNOSIS (Mild/Moderate/Severe)
+🦠 LIKELY CAUSES
+💊 TREATMENT PLAN
+🛡️ PREVENTION
+Plain text only.`,
+      messages:[{role:'user',content:[
+        {type:'image',source:{type:'base64',media_type:plantMime,data:plantB64}},
+        {type:'text',text:ctx?`Analyze plant health. Context: ${ctx}`:'Analyze this plant for any health issues, diseases, pests, or deficiencies.'}
+      ]}]
+    })});
+    const data=await res.json();
+    if(data.error) throw new Error(data.error.message);
+    result.textContent=data.content.map(b=>b.text||'').join('');
+    result.classList.add('on');
+  } catch(e) { result.textContent='Error: '+e.message; result.classList.add('on'); }
+  finally { loader.classList.remove('on'); }
+}
+
+// ─── INIT ─────────────────────────────────────
+window.addEventListener('load', checkApiKey);
+document.addEventListener('touchmove', e=>{ if(e.touches.length>1) e.preventDefault(); },{passive:false});
+</script>
+</body>
+</html>
